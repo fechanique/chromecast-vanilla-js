@@ -42,9 +42,57 @@ function composeProtoBuf(namespace, payload){
 }
 
 function sendProtobufMessage(client, messageBuffer) {
-    const length = messageBuffer.length;
     const header = Buffer.alloc(4);
-    header.writeUInt32BE(length, 0);
+    header.writeUInt32BE(messageBuffer.length, 0);
     const finalBuffer = Buffer.concat([header, messageBuffer]);
     client.write(finalBuffer);
 }
+
+
+
+
+/*
+Protobuf
+1. Conoce las reglas de codificación Protobuf
+    Protobuf codifica cada campo como <key><value>:
+
+    key: Combina el field_number y el wire_type.
+    wire_type indica el tipo de datos:
+    0 = varint (enteros)
+    2 = length-delimited (strings, bytes)
+    Para obtener el key: (field_number << 3) | wire_type.
+    value: Dependiendo del tipo de datos:
+    varint: se codifica en base 128, con continuación de bits.
+    length-delimited: primero un varint con la longitud, luego los bytes de la cadena o datos binarios.
+    Ejemplo:
+        Para source_id (field 2, string), wire_type = 2:
+
+        field_number = 2
+        (2 << 3) = 16 (0x10)
+        0x10 | 0x02 = 0x12
+        El primer byte para source_id será 0x12. Luego escribes la longitud de la cadena en varint y luego los bytes ASCII/UTF-8 de la cadena.
+
+2. Determina el orden de los campos
+    Aunque Protobuf permite el uso de campos en cualquier orden, es buena práctica seguir el orden por field_number. 
+    Además, asegúrate de incluir solo los campos necesarios. En el caso de Chromecast:
+
+    protocol_version (field 1) va primero
+    source_id (field 2)
+    destination_id (field 3)
+    namespace (field 4)
+    payload_type (field 5)
+    payload_utf8 (field 6)
+3. Codifica cada campo manualmente
+    Para un varint (ej. protocol_version=0, payload_type=0):
+    El valor 0 en varint es simplemente 0x00.
+    Para un string (ej. source_id="sender-0"):
+    Convierte "sender-0" a bytes ASCII: [0x73,0x65,0x6e,0x64,0x65,0x72,0x2d,0x30]
+    Longitud = 8 → varint 8 = 0x08
+    Campo: [0x12 (key), 0x08 (length), 0x73,0x65,0x6e,0x64,0x65,0x72,0x2d,0x30]
+4. Junta todos los campos
+    Concatenas todos los campos codificados uno tras otro para formar el mensaje. Asegúrate de que todos los lengths y varints estén correctos.
+
+5. Añade la longitud del mensaje al principio
+    El Chromecast (y el protocolo Cast) espera que precedas el mensaje Protobuf con 4 bytes (UInt32 Big-Endian) que indiquen la longitud total del mensaje. 
+    Esto no es parte de Protobuf en sí, sino parte del framing específico del protocolo Cast.
+*/
